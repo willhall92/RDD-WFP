@@ -1,0 +1,100 @@
+
+fuelshare <- WM%>%group_by(Age, WFP_Eligible) %>%summarise(Fuel_Share = as.numeric(mean(Fuel_Share)))
+fuelshare
+
+
+METHOD (1)
+
+# Step 1: Estimation of Density f(c) and Conditional Variance (sigma^2(c))
+# Use the Silverman Rule to get a pilot bandwidth for calculating the density and variance at c.
+# Data
+X <- as.vector(fuelshare$Age)
+y <- as.vector(fuelshare$Fuel_Share)
+c <- 59
+
+# Estimation of density (f.hat.c) and conditional variance (S.hat_c ^ 2)
+Sx <- sd(X)
+N <- length(X)
+N.pos <- sum(X >= c)
+N.neg <- sum(X < c)
+h1 <- 1.84 * Sx * (N^-0.2)
+
+# Calculate the number of units on either side of the threshold, and the
+# average outcomes on either side.
+i_plus <- (X <= c + h1) & (X >= c)
+i_minus <- (X >= c - h1) & (X < c)
+
+# Estimate the density of Xi at c
+f.hat.c <- (sum(i_plus) + sum(i_minus))/(2 * N * h1)
+
+# Estimate the conditional variance of Yi given Xi = x, at x = c
+sigmas <- mean(c(y[i_plus] - mean(y[i_plus]), y[i_minus] - mean(y[i_minus]))^2)
+
+#Step 2: Estimation of second derivatives
+
+step_2_data <- as.data.frame(cbind(y, X, X_d=X-c))
+step_2_lm <- lm(y ~ X + I(X^2) + I(X^3) + (X>=c), data= step_2_data ,subset=X >= median(X[X<c]) & X <= median(X[X>=c]))
+m3hat.c <- 6 * coef(step_2_lm)[4]
+h2.pos <- ((sigmas/(f.hat.c * m3hat.c^2))^(1/7) * 3.56 * (N.pos^(-1/7)))
+h2.neg <- ((sigmas/(f.hat.c * m3hat.c^2))^(1/7) * 3.56 * (N.neg^(-1/7)))
+
+# Given the pilot bandwidths h2.pos and h2.neg estimate the curvature by local quadratic
+lm.h2.pos <- lm(y ~ X + I(X^2), data = step_2_data, subset = X >= c & X <= h2.pos + c)
+m2hat.pos.c <- 2 * coef(lm.h2.pos)[3]
+N2.pos <- length(lm.h2.pos$residuals)
+
+lm.h2.neg <- lm(y ~ X + I(X^2), data = step_2_data, subset = X >= c - h2.neg & X < c)
+m2hat.neg.c <- 2 * coef(lm.h2.neg)[3]
+N2.neg <- length(lm.h2.neg$residuals)
+
+# Step 3: Calculation of reg terms
+
+# (3) Calculation of r.hat.neg and r.hat.pos
+r.hat.neg <- (720 * sigmas)/(N2.neg * h2.neg^4)
+r.hat.pos <- (720 * sigmas)/(N2.pos * h2.pos^4)
+
+# (3) Calculate h.opt
+C_k <- 3.4375
+h.opt <- C_k * ((2 * sigmas/(f.hat.c * ((m2hat.pos.c - m2hat.neg.c)^2 + r.hat.pos + r.hat.neg)))^(1/5)) * (N^(-1/5))
+
+> h.opt
+  I(X^2) 
+18.21834 
+
+
+METHOD (2)
+
+rdbwselect(y, X, c = 59, p = 1, q = 2, bwselect = 'IK')
+
+BW Selector   IK        
+Number of Obs 73        
+NN Matches    3         
+Kernel Type   Triangular
+
+                   Left Right
+Number of Obs      41   32   
+Order Loc Poly (p) 1    1    
+Order Bias (q)     2    2    
+
+            h        b
+[1,] 17.25068 21.06393
+
+rdrobust(y,X, c = 59, p = 1, q = 2, bwselect = 'IK')
+
+Number of Obs 73        
+NN Matches    3         
+BW Type       IK        
+Kernel Type   Triangular
+
+                   Left    Right  
+Number of Obs      17      18     
+Order Loc Poly (p) 1       1      
+Order Bias (q)     2       2      
+BW Loc Poly (h)    17.2507 17.2507
+BW Bias (b)        21.0639 21.0639
+rho (h/b)          0.8190  0.8190 
+
+Estimates:
+             Coef    Std. Err. z       P>|z|  CI Lower CI Upper
+Conventional -0.0000 0.0024    -0.0131 0.9895 -0.0047  0.0047  
+Robust                                 0.5181 -0.0042  0.0083  
